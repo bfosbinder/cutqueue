@@ -1,0 +1,1643 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CutQueue</title>
+<style>
+:root {
+  color-scheme: dark;
+  --bg:           #0d1117;
+  --bg-surface:   #161b22;
+  --bg-elevated:  #21262d;
+  --bg-input:     #0d1117;
+  --bg-hover:     #1c2940;
+  --bg-grid:      #1c2128;
+  --border:       #30363d;
+  --text-primary: #f0f6fc;
+  --text-body:    #c9d1d9;
+  --text-muted:   #8b949e;
+  --text-subtle:  #484f58;
+  --shadow:       rgba(0,0,0,0.6);
+}
+[data-theme="light"] {
+  color-scheme: light;
+  --bg:           #f6f8fa;
+  --bg-surface:   #ffffff;
+  --bg-elevated:  #f0f2f4;
+  --bg-input:     #ffffff;
+  --bg-hover:     #ddf4ff;
+  --bg-grid:      #eaecef;
+  --border:       #d0d7de;
+  --text-primary: #1f2328;
+  --text-body:    #24292f;
+  --text-muted:   #57606a;
+  --text-subtle:  #8c959f;
+  --shadow:       rgba(0,0,0,0.15);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text-body);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Header ── */
+header {
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+  padding: 14px 24px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.logo { display: flex; align-items: center; gap: 10px; }
+.logo-mark {
+  width: 34px; height: 34px;
+  background: #003366;
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 900;
+  color: #ffffff;
+  letter-spacing: -0.5px;
+  flex-shrink: 0;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  user-select: none;
+}
+.logo-wordmark {
+  font-size: 19px; font-weight: 700;
+  letter-spacing: -0.3px;
+  color: var(--text-primary);
+  line-height: 1;
+}
+.logo-wordmark em { font-style: normal; color: #003366; }
+.header-today { margin-left: auto; font-size: 12px; color: var(--text-muted); }
+
+/* ── Theme toggle ── */
+.btn-theme {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: 6px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  height: 30px;
+  white-space: nowrap;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.btn-theme:hover { color: var(--text-primary); border-color: var(--text-muted); }
+
+/* ── View toggle ── */
+.btn-view {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: 6px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  height: 30px;
+  white-space: nowrap;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.btn-view:hover { color: var(--text-primary); border-color: var(--text-muted); }
+.btn-view.active { color: #f0c040; border-color: #f0c040; background: rgba(240,192,64,0.08); }
+
+.btn-export {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: 6px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  height: 30px;
+  white-space: nowrap;
+  transition: color 0.15s, border-color 0.15s;
+}
+.btn-export:hover { color: #388bfd; border-color: #388bfd; }
+
+body.gantt-only .top-panel,
+body.gantt-only #summarySection,
+body.gantt-only #tableSection { display: none !important; }
+
+/* ── Top panel (paste + capacity) ── */
+.top-panel {
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+  padding: 20px 24px;
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+/* paste box */
+.paste-box { flex: 1; min-width: 300px; }
+.paste-box label {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-bottom: 6px;
+}
+.paste-box textarea {
+  width: 100%;
+  height: 100px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-body);
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 12px;
+  padding: 10px 12px;
+  resize: vertical;
+}
+.paste-box textarea:focus { outline: none; border-color: #388bfd; box-shadow: 0 0 0 3px rgba(56,139,253,0.15); }
+.paste-box textarea::placeholder { color: var(--text-subtle); font-family: inherit; }
+.paste-actions { display: flex; gap: 8px; margin-top: 8px; align-items: center; }
+
+.btn {
+  padding: 7px 16px;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: opacity 0.15s;
+  height: 32px;
+}
+.btn:hover { opacity: 0.8; }
+.btn-primary { background: #238636; color: #fff; }
+.btn-danger  { background: var(--bg-elevated); color: #f85149; border: 1px solid var(--border); }
+.btn-sm { padding: 4px 12px; font-size: 12px; height: 26px; }
+
+.parse-status { font-size: 12px; color: var(--text-muted); }
+.parse-status.ok  { color: #3fb950; }
+.parse-status.err { color: #f85149; }
+
+/* capacity + settings sidebar */
+.settings-box {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 240px;
+}
+
+.setting-card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+.setting-card .card-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-bottom: 10px;
+}
+
+.cap-input-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.cap-input-row input[type="number"] {
+  width: 80px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  color: #f0c040;
+  padding: 5px 8px;
+  border-radius: 5px;
+  font-size: 16px;
+  font-weight: 700;
+  text-align: center;
+  font-family: inherit;
+  height: 34px;
+}
+.cap-input-row input[type="number"]:focus {
+  outline: none; border-color: #f0a000; box-shadow: 0 0 0 3px rgba(240,160,0,0.15);
+}
+.cap-unit { font-size: 13px; color: var(--text-muted); }
+.cap-effect {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 4px;
+  display: inline-block;
+}
+.cap-effect.same   { color: var(--text-muted); background: rgba(139,148,158,0.1); }
+.cap-effect.slower { color: #f85149; background: rgba(248,81,73,0.1); }
+.cap-effect.faster { color: #3fb950; background: rgba(63,185,80,0.1); }
+
+/* anchor date/time inputs */
+.ctrl-input {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  color: var(--text-body);
+  padding: 5px 8px;
+  border-radius: 5px;
+  font-size: 13px;
+  font-family: inherit;
+  height: 32px;
+  flex: 1;
+}
+.ctrl-input:focus { outline: none; border-color: #388bfd; box-shadow: 0 0 0 3px rgba(56,139,253,0.15); }
+input.ctrl-input { min-width: 130px; }
+select.ctrl-input { min-width: 120px; cursor: pointer; }
+
+/* ── Job table ── */
+.job-table-section {
+  padding: 0 24px 0 24px;
+  background: var(--bg);
+  overflow-x: auto;
+}
+.job-table-section.hidden { display: none; }
+
+.job-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin: 16px 0;
+}
+.job-table th {
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 2px solid var(--border);
+  white-space: nowrap;
+}
+.job-table td {
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--bg-elevated);
+  color: var(--text-body);
+  white-space: nowrap;
+}
+.job-table tbody tr:nth-child(even) td { background: rgba(56,139,253,0.06); }
+.job-table tr:hover td { background: var(--bg-hover); }
+.job-table .col-num { text-align: center; }
+.job-table .col-pri { font-weight: 700; color: var(--text-primary); text-align: center; }
+.badge-active   { background: rgba(63,185,80,0.15); color: #3fb950; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+.badge-inactive { background: rgba(139,148,158,0.1); color: var(--text-muted); padding: 2px 8px; border-radius: 10px; font-size: 11px; }
+.early, .job-table td.early { color: #3fb950; font-weight: 700; }
+.late,  .job-table td.late  { color: #f85149; font-weight: 700; }
+.btn-remove-row { background: none; border: none; color: var(--text-subtle); font-size: 16px; cursor: pointer; padding: 0 4px; }
+.btn-remove-row:hover { color: #f85149; }
+.color-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; flex-shrink: 0; }
+
+/* ── Machine tabs ── */
+.machine-tab-bar {
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+  padding: 0 24px;
+  display: none;
+  gap: 0;
+  align-items: flex-end;
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+.machine-tab {
+  background: none;
+  border: none;
+  border-bottom: 3px solid transparent;
+  color: var(--text-muted);
+  padding: 10px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+  transition: color 0.15s, border-color 0.15s;
+  margin-bottom: -1px;
+}
+.machine-tab:hover { color: var(--text-primary); }
+.machine-tab.active { color: var(--text-primary); border-bottom-color: #388bfd; background: rgba(56,139,253,0.06); }
+.machine-tab .tab-badge {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  vertical-align: middle;
+}
+.machine-tab.active .tab-badge { background: rgba(56,139,253,0.15); color: #388bfd; }
+
+/* ── Gantt ── */
+.gantt-section {
+  padding: 20px 24px;
+  flex: 1;
+  overflow-x: auto;
+  min-height: 200px;
+}
+.gantt-section.hidden { display: none; }
+
+.legend {
+  display: flex;
+  gap: 20px;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.legend-item { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--text-muted); }
+.legend-swatch { width: 22px; height: 10px; border-radius: 3px; }
+.legend-divider { width: 1px; height: 14px; background: var(--border); }
+
+.gantt-chart { min-width: 600px; }
+
+.gantt-header-row { display: flex; margin-bottom: 4px; }
+.g-label-col {
+  width: 220px;
+  flex-shrink: 0;
+  padding-right: 12px;
+  font-size: 11px;
+  color: var(--text-subtle);
+  display: flex;
+  align-items: flex-end;
+  padding-bottom: 4px;
+}
+.g-axis {
+  flex: 1;
+  position: relative;
+  height: 34px;
+  border-bottom: 1px solid var(--border);
+}
+.axis-tick {
+  position: absolute;
+  bottom: 0;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.axis-tick-label { font-size: 10px; color: var(--text-muted); white-space: nowrap; }
+.axis-tick-line  { width: 1px; height: 6px; background: var(--border); }
+
+.gantt-body { position: relative; }
+
+.g-row {
+  display: flex;
+  margin-bottom: 2px;
+  align-items: center;
+  padding: 6px 4px;
+  border-radius: 4px;
+}
+.g-row-stripe { background: rgba(56,139,253,0.06); }
+
+.g-machine-header {
+  display: flex;
+  align-items: center;
+  padding: 14px 4px 6px;
+  margin-top: 4px;
+}
+.g-machine-header:first-child { padding-top: 4px; }
+.g-machine-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 700;
+  color: #f0a000;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.g-machine-rule { flex: 1; height: 2px; background: var(--border); border-radius: 1px; }
+
+.machine-group-header { background: var(--bg-surface) !important; }
+.machine-group-header td {
+  padding: 10px 12px 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #f0a000;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  border-bottom: 2px solid var(--border);
+  border-top: 1px solid var(--border);
+}
+.g-row-label {
+  width: 220px;
+  flex-shrink: 0;
+  padding-right: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.g-row-label .job-id {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+}
+.g-row-label .job-sub { font-size: 10px; color: var(--text-muted); }
+
+.bars-area {
+  flex: 1;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+body.hide-sched .sched-track { display: none; }
+
+.bar-track { position: relative; height: 18px; width: 100%; }
+.bar {
+  position: absolute;
+  height: 100%;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  cursor: default;
+  min-width: 3px;
+}
+.bar:hover { filter: brightness(1.15); }
+.bar-label {
+  padding: 0 5px;
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: rgba(255,255,255,0.9);
+  overflow: hidden;
+}
+
+.today-line {
+  position: absolute;
+  top: -34px;
+  bottom: 0;
+  width: 2px;
+  background: #ff6b6b;
+  z-index: 20;
+  pointer-events: none;
+}
+.today-label {
+  position: absolute;
+  top: -26px;
+  left: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #ff6b6b;
+  white-space: nowrap;
+}
+
+.grid-line-v {
+  position: absolute;
+  top: -34px;
+  bottom: 0;
+  width: 1px;
+  background: var(--bg-grid);
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* tooltip */
+.tooltip {
+  position: fixed;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 16px;
+  font-size: 12px;
+  pointer-events: none;
+  z-index: 1000;
+  display: none;
+  min-width: 220px;
+  box-shadow: 0 8px 24px var(--shadow);
+}
+.tt-title { font-weight: 700; color: var(--text-primary); margin-bottom: 8px; font-size: 13px; }
+.tt-row { display: flex; justify-content: space-between; gap: 16px; color: var(--text-muted); margin-bottom: 4px; }
+.tt-row span:last-child { color: var(--text-body); font-weight: 600; }
+.tt-divider { border: none; border-top: 1px solid var(--border); margin: 6px 0; }
+
+/* ── Summary / KPI section ── */
+.summary-section {
+  padding: 20px 24px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+.summary-section.hidden { display: none; }
+
+.kpi-row { display: flex; gap: 12px; margin-bottom: 18px; flex-wrap: wrap; }
+
+.kpi-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-top: 3px solid;
+  border-radius: 8px;
+  padding: 14px 20px;
+  flex: 1;
+  min-width: 120px;
+}
+.kpi-value { font-size: 30px; font-weight: 700; color: var(--text-primary); line-height: 1; margin-bottom: 5px; }
+.kpi-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.6px; font-weight: 600; }
+.kpi-card.kpi-neutral { border-top-color: var(--border); }
+.kpi-card.kpi-green   { border-top-color: #3fb950; }
+.kpi-card.kpi-green .kpi-value { color: #3fb950; }
+.kpi-card.kpi-blue    { border-top-color: #388bfd; }
+.kpi-card.kpi-blue .kpi-value  { color: #388bfd; }
+.kpi-card.kpi-red     { border-top-color: #f85149; }
+.kpi-card.kpi-red .kpi-value   { color: #f85149; }
+
+.outlier-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-bottom: 10px;
+}
+.outlier-header.bad  { color: #f85149; }
+.outlier-header.good { color: #3fb950; }
+.outlier-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+.at-risk-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.at-risk-table th {
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 7px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.at-risk-table td {
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--bg-grid);
+  color: var(--text-body);
+  white-space: nowrap;
+}
+.at-risk-table tr:hover td { background: var(--bg-surface); }
+.at-risk-table tbody tr:nth-child(even) td { background: rgba(248,81,73,0.04); }
+
+.all-clear {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: rgba(63,185,80,0.08);
+  border: 1px solid rgba(63,185,80,0.2);
+  border-radius: 6px;
+  font-size: 13px;
+  color: #3fb950;
+  font-weight: 600;
+}
+
+/* ── Print / PDF export ───────────────────────────────────────────────── */
+@media print {
+  @page { size: landscape; margin: 12mm 16mm; }
+
+  /* Preserve bar and indicator colors exactly */
+  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+
+  /* Force light theme regardless of current setting */
+  :root {
+    --bg: #ffffff; --bg-surface: #f8f9fa; --bg-elevated: #f0f2f4;
+    --bg-grid: #e8eaed; --bg-hover: transparent; --border: #ced4da;
+    --text-primary: #1a1a2e; --text-body: #2d333b;
+    --text-muted: #6a737d; --text-subtle: #959da5;
+  }
+  body { background: #fff !important; color: #2d333b !important; }
+
+  /* Hide interactive / input-only elements */
+  .btn-theme, .btn-view, .top-panel, #tableSection,
+  .tooltip, .machine-cap-input, .machine-cap-input ~ span { display: none !important; }
+
+  /* Undo gantt-only hiding so summary prints too */
+  body.gantt-only #summarySection:not(.hidden) { display: block !important; }
+  #ganttSection { display: block !important; }
+
+  /* Header */
+  header { background: #fff !important; border-bottom: 2px solid #ced4da !important;
+           padding: 10px 0 !important; box-shadow: none !important; }
+
+  /* KPI cards */
+  .summary-section { padding: 12px 0 !important; }
+  .kpi-card { background: #f8f9fa !important; border-color: #ced4da !important;
+              box-shadow: none !important; }
+  .kpi-value { color: #1a1a2e !important; }
+
+  /* Gantt chrome */
+  .gantt-section { background: #fff !important; border: none !important;
+                   box-shadow: none !important; margin: 0 !important; padding: 0 !important; }
+  .gantt-body, .g-row { background: #fff !important; }
+  .g-row-stripe { background: rgba(0,0,0,0.03) !important; }
+  .g-machine-name { color: #1a1a2e !important; }
+  .g-machine-rule { background: #ced4da !important; }
+  .grid-line-v { background: #e8eaed !important; }
+  .today-line { border-color: #f85149 !important; }
+  .today-label { color: #f85149 !important; background: #fff !important; }
+  .axis-tick-label { color: #6a737d !important; background: #fff !important; }
+  .axis-tick-line { background: #ced4da !important; }
+  .g-row-label, .job-id { color: #2d333b !important; }
+  .job-sub { color: #6a737d !important; }
+  .color-dot { flex-shrink: 0; }
+  .bar-label { font-size: 9px !important; }
+}
+
+/* empty state */
+.empty-state {
+  text-align: center;
+  padding: 70px 40px;
+  color: var(--text-subtle);
+}
+.empty-state .icon { font-size: 48px; margin-bottom: 10px; }
+.empty-state p { font-size: 14px; margin-bottom: 4px; }
+.empty-state small { font-size: 12px; color: var(--text-subtle); opacity: 0.6; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-mark">CQ</div>
+    <div class="logo-wordmark">Cut<em>Queue</em></div>
+  </div>
+  <button class="btn-view" id="viewBtn" onclick="toggleView()">⊞ Gantt View</button>
+  <button class="btn-export" onclick="exportPDF()">↓ Export PDF</button>
+  <button class="btn-export" onclick="saveHTML()">⬇ Save HTML</button>
+  <div class="header-today">Today: <strong id="todayDisplay"></strong></div>
+  <button class="btn-theme" id="themeBtn" onclick="toggleTheme()">☀ Light</button>
+</header>
+
+<!-- Paste + Settings -->
+<div class="top-panel">
+  <div class="paste-box">
+    <label>Paste Schedule Data from Excel</label>
+    <textarea id="pasteArea" placeholder="Copy rows from Excel (including the header row) and paste here.
+
+Expected columns: ORDER TO RUN  Job  Part  Op #  Cell  Op Start Date  Op Cpt Date  Job Cpt Date  Run Hours  Setup  Total  Hrs Left  OTTB %  OTTP%  NOTES  Schedule Status  LOADED ON MEMEX"></textarea>
+    <div class="paste-actions">
+      <button class="btn btn-primary" onclick="parseAndLoad()">Load Jobs</button>
+      <button class="btn btn-danger" onclick="clearAll()">Clear All</button>
+      <span class="parse-status" id="parseStatus"></span>
+    </div>
+  </div>
+
+  <div class="settings-box">
+    <div class="setting-card">
+      <div class="card-label">Predicted Chain Start</div>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px;">
+        <input type="date" id="anchorDate" onchange="onAnchorChange()" class="ctrl-input" />
+        <select id="anchorTime" onchange="onAnchorChange()" class="ctrl-input"></select>
+      </div>
+      <div style="font-size:11px; color:var(--text-muted);">
+        First job starts at this date &amp; time. Each subsequent job queues immediately after.
+      </div>
+    </div>
+
+    <div class="setting-card">
+      <div id="machineCapacityInputs">
+        <div style="font-size:12px;color:#484f58;font-style:italic;">Load job data to view the schedule.</div>
+      </div>
+    </div>
+
+    <div class="setting-card" style="font-size:12px; color:var(--text-muted); line-height:1.6;">
+      <div class="card-label">Chart key</div>
+      <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+        <div style="width:22px; height:10px; border-radius:3px; background:#1f6feb;"></div>
+        Scheduled (Op Start → Op Cpt Date)
+      </div>
+      <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+        <div style="width:22px; height:10px; border-radius:3px; background:#f0a000;"></div>
+        Predicted (Hrs Left ÷ Daily Capacity, sequential)
+      </div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <div style="width:3px; height:14px; border-radius:2px; background:#ff6b6b;"></div>
+        Today
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Machine tabs -->
+<div class="machine-tab-bar" id="machineTabBar"></div>
+
+<!-- Schedule health summary -->
+<div class="summary-section hidden" id="summarySection">
+  <div class="kpi-row" id="kpiRow"></div>
+  <div id="atRiskList"></div>
+</div>
+
+<!-- Job summary table -->
+<div class="job-table-section hidden" id="tableSection">
+  <table class="job-table" id="jobTable">
+    <thead>
+      <tr>
+        <th class="col-num">Run Order</th>
+        <th>Job</th>
+        <th>Part</th>
+        <th class="col-num">Op #</th>
+        <th class="col-num">Run Hrs</th>
+        <th class="col-num">Setup</th>
+        <th class="col-num">Total</th>
+        <th class="col-num">Hrs Left</th>
+        <th>Op Start</th>
+        <th>Op Cpt</th>
+        <th>Job Cpt</th>
+        <th>Predicted Window</th>
+        <th>Early / Late</th>
+        <th>Status</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody id="jobTableBody"></tbody>
+  </table>
+</div>
+
+<!-- Gantt controls -->
+<div id="ganttControls" style="display:none; padding:8px 24px 0;">
+  <button class="btn-view" id="schedToggleBtn" onclick="toggleSchedLane()">⊟ Hide Scheduled</button>
+</div>
+
+<!-- Gantt -->
+<div class="gantt-section" id="ganttSection">
+  <div class="empty-state">
+    <div class="icon">📋</div>
+    <p>Paste your Excel schedule data above and click <strong>Load Jobs</strong></p>
+    <small>Supports the standard CNC schedule export format</small>
+  </div>
+</div>
+
+<!-- Tooltip -->
+<div class="tooltip" id="tooltip">
+  <div class="tt-title" id="ttTitle"></div>
+  <div class="tt-row"><span>Job</span><span id="ttJob"></span></div>
+  <div class="tt-row"><span>Part</span><span id="ttPart"></span></div>
+  <div class="tt-row"><span>Op #</span><span id="ttOp"></span></div>
+  <div class="tt-row"><span>Cell</span><span id="ttCell"></span></div>
+  <hr class="tt-divider">
+  <div class="tt-row"><span>Op Start</span><span id="ttStart"></span></div>
+  <div class="tt-row"><span>Op Cpt Date</span><span id="ttSchedEnd"></span></div>
+  <div class="tt-row"><span>Job Cpt Date</span><span id="ttJobCpt"></span></div>
+  <hr class="tt-divider">
+  <div class="tt-row"><span>Run Hrs / Setup / Total</span><span id="ttHours"></span></div>
+  <div class="tt-row"><span>Hrs Left</span><span id="ttHrsLeft"></span></div>
+  <div class="tt-row"><span>Daily Capacity</span><span id="ttCap"></span></div>
+  <div class="tt-row"><span>Predicted Window</span><span id="ttPredEnd"></span></div>
+  <div class="tt-row"><span>Days Early / Late</span><span id="ttVariance"></span></div>
+</div>
+
+<script>
+// ── Constants ─────────────────────────────────────────────────────────────
+const JOB_COLORS = [
+  '#388bfd','#3fb950','#a371f7','#4dd0e1',
+  '#e3b341','#56d364','#79c0ff','#ba68c8',
+  '#ffa657','#d2a8ff','#7ee787','#f0a000'
+];
+
+// ── State ─────────────────────────────────────────────────────────────────
+let jobs             = [];
+let machineCapacities = new Map(); // cell name → hrs/day
+let predictedAnchor  = null;       // null = use first job's Op Start Date
+let selectedMachine  = null;       // null = All machines
+const DEFAULT_CAP    = 8;
+
+// ── Init ──────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  const savedTheme = localStorage.getItem('theme');
+  if (savedTheme === 'light') {
+    document.documentElement.setAttribute('data-theme', 'light');
+    document.getElementById('themeBtn').textContent = '◑ Dark';
+  }
+  document.getElementById('todayDisplay').textContent = fmtDate(new Date());
+  populateAnchorTime();
+  initAnchorDefaults();
+});
+
+function exportPDF() {
+  window.print();
+}
+
+function saveHTML() {
+  if (jobs.length === 0) { alert('Load jobs first before saving.'); return; }
+  try {
+    // Use the live DOM — no fetch needed, works on file:// and http:// alike
+    const html = document.documentElement.outerHTML;
+
+    // Serialise state — Dates become ISO strings so they survive JSON round-trip
+    const jobsJSON   = JSON.stringify(jobs.map(j => ({
+      ...j,
+      scheduledStart: j.scheduledStart.toISOString(),
+      scheduledEnd:   j.scheduledEnd.toISOString(),
+      jobCptDate:     j.jobCptDate ? j.jobCptDate.toISOString() : null,
+    })));
+    const capsJSON      = JSON.stringify([...machineCapacities.entries()]);
+    const anchorJSON    = JSON.stringify(predictedAnchor ? predictedAnchor.toISOString() : null);
+    const anchorDateVal = document.getElementById('anchorDate').value;
+    const anchorTimeVal = document.getElementById('anchorTime').value;
+
+    // Bootstrap script injected into the saved file.
+    // Uses window 'load' so it runs after the app's own DOMContentLoaded setup.
+    const inject = `<script>
+window.addEventListener('load', function () {
+  // Reset any view-toggle classes baked into the outerHTML snapshot
+  selectedMachine = null;
+  document.body.classList.remove('gantt-only', 'hide-sched');
+  var viewBtn  = document.getElementById('viewBtn');
+  if (viewBtn)  { viewBtn.textContent = '⊞ Gantt View'; viewBtn.classList.remove('active'); }
+  var schedBtn = document.getElementById('schedToggleBtn');
+  if (schedBtn) schedBtn.textContent = '⊟ Hide Scheduled';
+
+  // Restore anchor date/time inputs (DOMContentLoaded resets them to today)
+  var savedDate = ${JSON.stringify(anchorDateVal)};
+  var savedTime = ${JSON.stringify(anchorTimeVal)};
+  if (savedDate) document.getElementById('anchorDate').value = savedDate;
+  if (savedTime) document.getElementById('anchorTime').value = savedTime;
+
+  jobs = (${jobsJSON}).map(function(j) {
+    return Object.assign({}, j, {
+      scheduledStart: new Date(j.scheduledStart),
+      scheduledEnd:   new Date(j.scheduledEnd),
+      jobCptDate:     j.jobCptDate ? new Date(j.jobCptDate) : null
+    });
+  });
+  machineCapacities = new Map(${capsJSON});
+  var a = ${anchorJSON};
+  predictedAnchor = a ? new Date(a) : null;
+  renderMachineCapacityInputs();
+  renderMachineTabs();
+  renderSummary();
+  renderTable();
+  renderGantt();
+  var s = document.getElementById('parseStatus');
+  s.textContent = jobs.length + ' jobs loaded';
+  s.className = 'parse-status ok';
+});
+${'<'}/script>`;
+
+    // outerHTML gives <html ...> without a DOCTYPE — prepend it so the
+    // saved file renders in standards mode (quirks mode breaks flex layout).
+    const idx      = html.lastIndexOf('</body>');
+    const modified = '<!DOCTYPE html>\n' + html.slice(0, idx) + inject + '\n</body>' + html.slice(idx + '</body>'.length);
+    const blob = new Blob([modified], { type: 'text/html' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = 'cutqueue-' + new Date().toISOString().slice(0, 10) + '.html';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    alert('Save failed: ' + e.message);
+  }
+}
+
+function toggleSchedLane() {
+  const hiding = document.body.classList.toggle('hide-sched');
+  document.getElementById('schedToggleBtn').textContent = hiding ? '⊞ Show Scheduled' : '⊟ Hide Scheduled';
+}
+
+function toggleView() {
+  const ganttOnly = document.body.classList.toggle('gantt-only');
+  const btn = document.getElementById('viewBtn');
+  if (ganttOnly) {
+    btn.textContent = '← Full View';
+    btn.classList.add('active');
+    document.getElementById('ganttSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } else {
+    btn.textContent = '⊞ Gantt View';
+    btn.classList.remove('active');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+}
+
+function toggleTheme() {
+  const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+  if (isLight) {
+    document.documentElement.removeAttribute('data-theme');
+    localStorage.setItem('theme', 'dark');
+    document.getElementById('themeBtn').textContent = '☀ Light';
+  } else {
+    document.documentElement.setAttribute('data-theme', 'light');
+    localStorage.setItem('theme', 'light');
+    document.getElementById('themeBtn').textContent = '◑ Dark';
+  }
+}
+
+function populateAnchorTime() {
+  const sel = document.getElementById('anchorTime');
+  for (let h = 0; h < 24; h++) {
+    for (let m = 0; m < 60; m += 30) {
+      sel.add(new Option(fmtTime12(h, m), `${pad2(h)}:${pad2(m)}`));
+    }
+  }
+  sel.value = '07:00';
+}
+
+function initAnchorDefaults() {
+  document.getElementById('anchorDate').value = toInputDate(new Date());
+  onAnchorChange();
+}
+
+// ── Parse Excel Paste ─────────────────────────────────────────────────────
+function parseAndLoad() {
+  const raw = document.getElementById('pasteArea').value.trim();
+  const statusEl = document.getElementById('parseStatus');
+
+  if (!raw) {
+    setStatus('Paste data first.', 'err');
+    return;
+  }
+
+  const lines = raw.split(/\r?\n/).filter(l => l.trim());
+  if (lines.length < 2) {
+    setStatus('Need at least a header row and one data row.', 'err');
+    return;
+  }
+
+  // Detect header row and find column indices
+  const headerLine = lines[0].split('\t').map(h => h.trim().toLowerCase());
+  const colIdx = detectColumns(headerLine);
+
+  if (colIdx === null) {
+    // Try treating first line as data (no header)
+    const parsed = parseRows(lines, null);
+    if (parsed.length === 0) {
+      setStatus('Could not parse data. Copy the header row too.', 'err');
+      return;
+    }
+    finishLoad(parsed);
+  } else {
+    const parsed = parseRows(lines.slice(1), colIdx);
+    if (parsed.length === 0) {
+      setStatus('No valid rows found.', 'err');
+      return;
+    }
+    finishLoad(parsed);
+  }
+}
+
+function finishLoad(parsed) {
+  jobs = parsed;
+  selectedMachine = null; // reset to All on fresh load
+  jobs.sort((a, b) => a.priority - b.priority);
+  jobs.forEach((j, i) => j.color = JOB_COLORS[i % JOB_COLORS.length]);
+  // Initialize capacity for any new machine — preserve existing values
+  groupByMachine(jobs).forEach((_, name) => {
+    if (!machineCapacities.has(name)) machineCapacities.set(name, DEFAULT_CAP);
+  });
+  setStatus(`${jobs.length} job${jobs.length !== 1 ? 's' : ''} loaded`, 'ok');
+  renderMachineCapacityInputs();
+  renderMachineTabs();
+  renderSummary();
+  renderTable();
+  renderGantt();
+}
+
+function detectColumns(header) {
+  const find = (...terms) => header.findIndex(h => terms.some(t => h.includes(t)));
+
+  const orderToRun  = find('order to run', 'order');
+  const jobNum      = find('job');
+  const partNum     = find('part');
+  const opNum       = find('op #', 'op#');
+  const cell        = find('cell');
+  const opStart     = find('op start');
+  const opCpt       = find('op cpt');
+  const jobCpt      = find('job cpt');
+  const runHours    = find('run hours', 'run hrs');
+  const setup       = find('setup');
+  const total       = find('total');
+  const hrsLeft     = find('hrs left', 'hours left');
+  const ottb        = find('ottb');
+  const ottp        = find('ottp');
+  const notes       = find('notes');
+  const schedStatus = find('schedule status');
+  const memex       = find('memex');
+
+  if (jobNum < 0 || opStart < 0 || opCpt < 0 || hrsLeft < 0) return null;
+
+  return { orderToRun, jobNum, partNum, opNum, cell, opStart, opCpt, jobCpt,
+           runHours, setup, total, hrsLeft, ottb, ottp, notes, schedStatus, memex };
+}
+
+function parseRows(lines, colIdx) {
+  const C = colIdx || {
+    orderToRun: 0, jobNum: 1, partNum: 2, opNum: 3, cell: 4,
+    opStart: 5, opCpt: 6, jobCpt: 7, runHours: 8, setup: 9,
+    total: 10, hrsLeft: 11, ottb: 12, ottp: 13, notes: 14,
+    schedStatus: 15, memex: 16
+  };
+
+  const result = [];
+  lines.forEach((line, idx) => {
+    if (!line.trim()) return;
+    const cols = line.split('\t');
+    if (cols.length < 8) return;
+
+    const g = (i) => (i >= 0 && i < cols.length) ? cols[i].trim() : '';
+
+    const opStart = parseExcelDate(g(C.opStart));
+    const opCpt   = parseExcelDate(g(C.opCpt));
+    if (!opStart || !opCpt) return;
+
+    const jobNum  = g(C.jobNum)  || `Job ${idx + 1}`;
+    // Skip rows where job looks like a header word
+    if (isNaN(parseInt(jobNum)) && jobNum.toLowerCase().includes('job')) return;
+
+    result.push({
+      id:            Date.now() + Math.random(),
+      priority:      parseInt(g(C.orderToRun)) || (idx + 1),
+      jobNum,
+      partNum:       g(C.partNum),
+      opNum:         g(C.opNum),
+      cell:          g(C.cell),
+      scheduledStart: opStart,
+      scheduledEnd:   opCpt,
+      jobCptDate:    parseExcelDate(g(C.jobCpt)),
+      runHours:      parseFloat(g(C.runHours)) || 0,
+      setupHours:    parseFloat(g(C.setup))    || 0,
+      totalHours:    parseFloat(g(C.total))    || 0,
+      hoursLeft:     parseFloat(g(C.hrsLeft))  || 0,
+      ottb:          g(C.ottb),
+      ottp:          g(C.ottp),
+      notes:         g(C.notes),
+      schedStatus:   g(C.schedStatus),
+      memex:         g(C.memex),
+      color:         '#388bfd',
+    });
+  });
+  return result;
+}
+
+// ── Date parsing ──────────────────────────────────────────────────────────
+function parseExcelDate(str) {
+  if (!str) return null;
+  str = str.trim();
+  // M/D/YYYY or MM/DD/YYYY
+  const m1 = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m1) return new Date(+m1[3], +m1[1]-1, +m1[2]);
+  // YYYY-MM-DD
+  const m2 = str.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (m2) return new Date(+m2[1], +m2[2]-1, +m2[3]);
+  return null;
+}
+
+// ── Capacity ──────────────────────────────────────────────────────────────
+function capFor(machineName) {
+  return machineCapacities.get(machineName) || DEFAULT_CAP;
+}
+
+function calcSequentialPredictions(jobList, cap) {
+  const results = [];
+  let cursor = predictedAnchor ? new Date(predictedAnchor) : null;
+  jobList.forEach(job => {
+    const start = cursor !== null ? cursor : new Date(job.scheduledStart);
+    const end   = addWorkingHours(start, job.hoursLeft, cap || DEFAULT_CAP);
+    results.push({ predictedStart: start, predictedEnd: end });
+    cursor = end;
+  });
+  return results;
+}
+
+function renderMachineCapacityInputs() {
+  const container = document.getElementById('machineCapacityInputs');
+  const groups    = groupByMachine(jobs);
+  if (groups.size === 0) {
+    container.innerHTML = `<div style="font-size:12px;color:#484f58;font-style:italic;">Load job data to configure machine capacities.</div>`;
+    return;
+  }
+  container.innerHTML = '';
+
+  const btn = document.createElement('button');
+  btn.className = 'btn btn-primary';
+  btn.style.cssText = 'width:100%;margin-top:10px;';
+  btn.textContent = '↓ View Gantt Chart';
+  btn.onclick = () => {
+    renderSummary();
+    renderTable();
+    renderGantt();
+    document.getElementById('ganttSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+  container.appendChild(btn);
+}
+
+function onMachineCapChange(machineName, value) {
+  const val = parseFloat(value);
+  machineCapacities.set(machineName, (!isNaN(val) && val > 0) ? val : DEFAULT_CAP);
+  renderSummary();
+  renderTable();
+  renderGantt();
+}
+
+function onAnchorChange() {
+  const dateVal = document.getElementById('anchorDate').value;
+  const timeVal = document.getElementById('anchorTime').value;
+  predictedAnchor = (dateVal && timeVal) ? new Date(`${dateVal}T${timeVal}:00`) : null;
+  renderSummary();
+  renderTable();
+  renderGantt();
+}
+
+
+function renderMachineTabs() {
+  const bar    = document.getElementById('machineTabBar');
+  const groups = groupByMachine(jobs);
+  if (groups.size === 0) { bar.style.display = 'none'; return; }
+  bar.style.display = 'flex';
+  bar.innerHTML = '';
+
+  const makeTab = (label, machine, count) => {
+    const btn = document.createElement('button');
+    btn.className = 'machine-tab' + (selectedMachine === machine ? ' active' : '');
+    btn.innerHTML = label + (count !== undefined
+      ? `<span class="tab-badge">${count}</span>` : '');
+    btn.onclick = () => selectMachine(machine);
+    bar.appendChild(btn);
+  };
+
+  makeTab('All Machines', null, jobs.length);
+  groups.forEach((groupJobs, name) => makeTab(name, name, groupJobs.length));
+}
+
+function selectMachine(machine) {
+  // Clicking the already-active machine tab toggles back to All
+  selectedMachine = (machine !== null && machine === selectedMachine) ? null : machine;
+  renderMachineTabs();
+  renderSummary();
+  renderTable();
+  renderGantt();
+  // Scroll so the tab bar / gantt is in view
+  document.getElementById('machineTabBar').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function clearAll() {
+  if (jobs.length > 0 && !confirm('Clear all jobs?')) return;
+  jobs = [];
+  selectedMachine = null;
+  document.getElementById('pasteArea').value = '';
+  document.getElementById('parseStatus').textContent = '';
+  document.getElementById('parseStatus').className = 'parse-status';
+  document.getElementById('tableSection').classList.add('hidden');
+  document.getElementById('summarySection').classList.add('hidden');
+  document.getElementById('machineTabBar').style.display = 'none';
+  document.getElementById('ganttControls').style.display = 'none';
+  document.getElementById('ganttSection').innerHTML = `
+    <div class="empty-state">
+      <div class="icon">📋</div>
+      <p>Paste your Excel schedule data above and click <strong>Load Jobs</strong></p>
+      <small>Supports the standard CNC schedule export format</small>
+    </div>`;
+  renderMachineCapacityInputs(); // resets to placeholder (machine capacities map is preserved)
+}
+
+function removeJob(id) {
+  jobs = jobs.filter(j => j.id !== id);
+  jobs.forEach((j, i) => j.color = JOB_COLORS[i % JOB_COLORS.length]);
+  // If the selected machine no longer has jobs, fall back to All
+  if (selectedMachine && !jobs.some(j => j.cell === selectedMachine)) {
+    selectedMachine = null;
+  }
+  if (jobs.length === 0) {
+    document.getElementById('summarySection').classList.add('hidden');
+    document.getElementById('tableSection').classList.add('hidden');
+    document.getElementById('machineTabBar').style.display = 'none';
+    document.getElementById('ganttSection').innerHTML = `
+      <div class="empty-state">
+        <div class="icon">📋</div>
+        <p>All jobs removed. Paste new data above or edit your existing paste and click <strong>Load Jobs</strong>.</p>
+      </div>`;
+    setStatus('', '');
+  } else {
+    renderMachineTabs();
+    renderSummary();
+    renderTable();
+    renderGantt();
+  }
+}
+
+function setStatus(msg, type) {
+  const el = document.getElementById('parseStatus');
+  el.textContent = msg;
+  el.className = 'parse-status ' + (type || '');
+}
+
+// ── Machine grouping helpers ──────────────────────────────────────────────
+function groupByMachine(jobList) {
+  const groups = new Map();
+  jobList.forEach(job => {
+    const key = job.cell || 'Unknown Machine';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(job);
+  });
+  return groups;
+}
+
+function calcAllPredictions() {
+  const allPreds = new Map(); // job.id → {predictedStart, predictedEnd}
+  groupByMachine(jobs).forEach((groupJobs, machineName) => {
+    calcSequentialPredictions(groupJobs, capFor(machineName)).forEach((pred, i) => {
+      allPreds.set(groupJobs[i].id, pred);
+    });
+  });
+  return allPreds;
+}
+
+// ── Render Summary ────────────────────────────────────────────────────────
+function renderSummary() {
+  const section = document.getElementById('summarySection');
+  if (jobs.length === 0) { section.classList.add('hidden'); return; }
+  section.classList.remove('hidden');
+
+  const allPreds   = calcAllPredictions();
+  const visibleJobs = selectedMachine ? jobs.filter(j => j.cell === selectedMachine) : jobs;
+  let early = 0, onTime = 0, late = 0;
+  const lateJobs = [];
+
+  visibleJobs.forEach(job => {
+    const { predictedEnd } = allPreds.get(job.id);
+    const diff = Math.round((job.scheduledEnd - predictedEnd) / 86400000);
+    if (diff > 0) early++;
+    else if (diff === 0) onTime++;
+    else { late++; lateJobs.push({ job, predictedEnd, diff }); }
+  });
+
+  lateJobs.sort((a, b) => a.diff - b.diff); // most late first
+  const totalHrs = visibleJobs.reduce((s, j) => s + j.hoursLeft, 0);
+
+  document.getElementById('kpiRow').innerHTML = `
+    <div class="kpi-card kpi-neutral">
+      <div class="kpi-value">${visibleJobs.length}</div>
+      <div class="kpi-label">Total Jobs</div>
+    </div>
+    <div class="kpi-card kpi-green">
+      <div class="kpi-value">${early}</div>
+      <div class="kpi-label">Finishing Early</div>
+    </div>
+    <div class="kpi-card kpi-neutral">
+      <div class="kpi-value">${onTime}</div>
+      <div class="kpi-label">On Time</div>
+    </div>
+    <div class="kpi-card kpi-red">
+      <div class="kpi-value">${late}</div>
+      <div class="kpi-label">Finishing Late</div>
+    </div>
+    <div class="kpi-card kpi-blue">
+      <div class="kpi-value">${totalHrs.toFixed(1)}</div>
+      <div class="kpi-label">Total Hrs Left</div>
+    </div>`;
+
+  const atRisk = document.getElementById('atRiskList');
+  if (lateJobs.length === 0) {
+    atRisk.innerHTML = `<div class="all-clear">✓ All jobs are on track or finishing early</div>`;
+    return;
+  }
+
+  let html = `
+    <div class="outlier-header bad">
+      <div class="outlier-dot" style="background:#f85149"></div>
+      ${lateJobs.length} job${lateJobs.length !== 1 ? 's' : ''} finishing late
+    </div>
+    <table class="at-risk-table">
+      <thead><tr>
+        <th>Machine</th><th>Job</th><th>Part</th>
+        <th>Sched. Completion</th><th>Predicted End</th><th>Days Late</th>
+      </tr></thead>
+      <tbody>`;
+
+  lateJobs.forEach(({ job, predictedEnd, diff }) => {
+    html += `<tr>
+      <td>${esc(job.cell)}</td>
+      <td><span class="color-dot" style="background:${job.color}"></span>${esc(job.jobNum)}</td>
+      <td>${esc(job.partNum)}</td>
+      <td>${fmtDate(job.scheduledEnd)}</td>
+      <td style="color:#f85149;font-weight:700">${fmtDate(predictedEnd)}</td>
+      <td style="color:#f85149;font-weight:700">+${Math.abs(diff)}d</td>
+    </tr>`;
+  });
+
+  html += `</tbody></table>`;
+  atRisk.innerHTML = html;
+}
+
+// ── Render Table ──────────────────────────────────────────────────────────
+function renderTable() {
+  const section = document.getElementById('tableSection');
+  const tbody   = document.getElementById('jobTableBody');
+  if (jobs.length === 0) { section.classList.add('hidden'); return; }
+  section.classList.remove('hidden');
+
+  const allPreds = calcAllPredictions();
+  const allGroups = groupByMachine(jobs);
+  const groups = selectedMachine
+    ? (allGroups.has(selectedMachine) ? new Map([[selectedMachine, allGroups.get(selectedMachine)]]) : new Map())
+    : allGroups;
+  const COLS     = 15; // total column count including delete button
+
+  tbody.innerHTML = '';
+  groups.forEach((groupJobs, machineName) => {
+    // Machine group header row
+    const hdr = document.createElement('tr');
+    hdr.className = 'machine-group-header';
+    hdr.innerHTML = `<td colspan="${COLS}">⚙ ${esc(machineName)}</td>`;
+    tbody.appendChild(hdr);
+
+    // Job rows — stripe resets per machine
+    groupJobs.forEach((job, rowIdx) => {
+      const { predictedStart, predictedEnd } = allPreds.get(job.id);
+      const diffDays = Math.round((job.scheduledEnd - predictedEnd) / 86400000);
+      const diffStr  = diffDays === 0 ? 'On time'
+                     : diffDays > 0  ? `+${diffDays}d early`
+                     :                 `${Math.abs(diffDays)}d late`;
+      const diffClass = diffDays > 0 ? 'early' : diffDays < 0 ? 'late' : '';
+
+      const tr = document.createElement('tr');
+      if (rowIdx % 2 === 1) tr.style.background = 'rgba(56,139,253,0.06)';
+      tr.innerHTML = `
+        <td class="col-num"><span style="color:${job.color};font-weight:700">${job.priority}</span></td>
+        <td><span class="color-dot" style="background:${job.color}"></span>${esc(job.jobNum)}</td>
+        <td>${esc(job.partNum)}</td>
+        <td class="col-num">${esc(job.opNum)}</td>
+        <td class="col-num">${job.runHours.toFixed(2)}</td>
+        <td class="col-num">${job.setupHours.toFixed(2)}</td>
+        <td class="col-num">${job.totalHours.toFixed(2)}</td>
+        <td class="col-num">${job.hoursLeft.toFixed(2)}</td>
+        <td>${fmtDate(job.scheduledStart)}</td>
+        <td>${fmtDate(job.scheduledEnd)}</td>
+        <td>${job.jobCptDate ? fmtDate(job.jobCptDate) : '—'}</td>
+        <td>${fmtDate(predictedStart)} → ${fmtDate(predictedEnd)}</td>
+        <td class="${diffClass}">${diffStr}</td>
+        <td><span class="${job.schedStatus === 'Locked' ? 'badge-active' : 'badge-inactive'}">${esc(job.schedStatus)}</span></td>
+        <td><button class="btn-remove-row" onclick="removeJob(${job.id})" title="Remove">×</button></td>
+      `;
+      tbody.appendChild(tr);
+    });
+  });
+}
+
+// ── Render Gantt ──────────────────────────────────────────────────────────
+function renderGantt() {
+  const section = document.getElementById('ganttSection');
+  if (jobs.length === 0) return;
+  section.classList.remove('hidden');
+  document.getElementById('ganttControls').style.display = 'block';
+
+  const today    = new Date(); today.setHours(0,0,0,0);
+  const allPreds = calcAllPredictions();
+  const allGroups = groupByMachine(jobs);
+  const groups = selectedMachine
+    ? (allGroups.has(selectedMachine) ? new Map([[selectedMachine, allGroups.get(selectedMachine)]]) : new Map())
+    : allGroups;
+
+  // Date range across all machines
+  const allDates = [today,
+    ...jobs.map(j => j.scheduledStart),
+    ...jobs.map(j => j.scheduledEnd),
+    ...[...allPreds.values()].map(p => p.predictedStart),
+    ...[...allPreds.values()].map(p => p.predictedEnd),
+  ];
+  const padMs = 1.5 * 86400000;
+  let minD = new Date(Math.min(...allDates) - padMs);
+  let maxD = new Date(Math.max(...allDates) + padMs);
+  const totalMs = maxD - minD;
+
+  const pct = d => Math.max(0, Math.min(100, ((d - minD) / totalMs) * 100));
+
+  // Tick interval
+  const totalDays = totalMs / 86400000;
+  const tickDays  = totalDays <= 7 ? 1 : totalDays <= 21 ? 2
+                  : totalDays <= 60 ? 7 : totalDays <= 120 ? 14 : 30;
+  const ticks = [];
+  let t = new Date(minD); t.setHours(0,0,0,0);
+  while (t <= maxD) { ticks.push(new Date(t)); t = new Date(t.getTime() + tickDays * 86400000); }
+
+  // ── Axis header
+  let html = `<div class="gantt-header-row">
+    <div class="g-label-col">Job</div>
+    <div class="g-axis">`;
+  ticks.forEach(tk => {
+    html += `<div class="axis-tick" style="left:${pct(tk)}%">
+      <span class="axis-tick-label">${tickDays >= 7 ? fmtDateShort(tk) : fmtDateMD(tk)}</span>
+      <div class="axis-tick-line"></div>
+    </div>`;
+  });
+  html += `</div></div><div class="gantt-body">`;
+
+  // Grid lines
+  ticks.forEach(tk => {
+    const f = (pct(tk) / 100).toFixed(6);
+    html += `<div class="grid-line-v" style="left:calc(220px + ${f} * (100% - 220px))"></div>`;
+  });
+
+  // Today line
+  const todayF = (pct(today) / 100).toFixed(6);
+  html += `<div class="today-line" style="left:calc(220px + ${todayF} * (100% - 220px))">
+    <span class="today-label">Today</span>
+  </div>`;
+
+  // ── Machine groups
+  groups.forEach((groupJobs, machineName) => {
+    const cap = capFor(machineName);
+    html += `<div class="g-machine-header">
+      <div style="width:220px;flex-shrink:0;display:flex;align-items:center;gap:5px;padding-right:8px;">
+        <div class="g-machine-name">⚙ ${esc(machineName)}</div>
+        <input type="number" class="machine-cap-input" data-machine="${esc(machineName)}"
+          value="${cap}" min="0.1" step="0.1"
+          style="width:42px;background:#0d1117;border:1px solid #30363d;color:#f0c040;padding:2px 4px;border-radius:4px;font-size:11px;font-weight:700;text-align:center;font-family:inherit;height:22px;flex-shrink:0;" />
+        <span style="font-size:10px;color:#8b949e;flex-shrink:0;">h/d</span>
+      </div>
+      <div class="g-machine-rule"></div>
+    </div>`;
+
+    groupJobs.forEach((job, rowIdx) => {
+      const { predictedStart, predictedEnd } = allPreds.get(job.id);
+      const jobIdx = jobs.indexOf(job);
+
+      const schedStartP = pct(job.scheduledStart);
+      const schedEndP   = pct(job.scheduledEnd);
+      const predStartP  = pct(predictedStart);
+      const predEndP    = pct(predictedEnd);
+      const schedW      = Math.max(schedEndP - schedStartP, 0.2);
+      const predW       = Math.max(predEndP  - predStartP,  0.3);
+
+      const diffDays  = Math.round((job.scheduledEnd - predictedEnd) / 86400000);
+      const predColor = diffDays > 0 ? '#3fb950' : diffDays < 0 ? '#f85149' : '#f0a000';
+      const predLabel = diffDays > 0 ? `${diffDays}d early` : diffDays < 0 ? `${Math.abs(diffDays)}d late` : 'on time';
+      const jobLabel  = job.partNum ? `${job.jobNum} · ${job.partNum}` : job.jobNum;
+      const durDays   = ((job.scheduledEnd - job.scheduledStart) / 86400000).toFixed(1);
+      const predDays  = (job.hoursLeft / cap).toFixed(1);
+
+      html += `
+      <div class="g-row${rowIdx % 2 === 1 ? ' g-row-stripe' : ''}">
+        <div class="g-row-label">
+          <div class="job-id">
+            <span class="color-dot" style="background:${job.color}"></span>
+            <span title="${esc(jobLabel)}">${esc(jobLabel)}</span>
+          </div>
+          <div class="job-sub">Op ${esc(job.opNum)} &nbsp;·&nbsp; ${job.hoursLeft}h left</div>
+        </div>
+        <div class="bars-area">
+          <div class="bar-track sched-track">
+            <div class="bar" style="left:${schedStartP}%;width:${schedW}%;background:${job.color};opacity:0.85;"
+                 onmouseenter="showTT(event,${jobIdx},'sched')" onmouseleave="hideTT()">
+              <span class="bar-label">Sched. ${durDays}d</span>
+            </div>
+          </div>
+          <div class="bar-track">
+            <div class="bar" style="left:${predStartP}%;width:${predW}%;background:${predColor};opacity:0.9;"
+                 onmouseenter="showTT(event,${jobIdx},'pred')" onmouseleave="hideTT()">
+              <span class="bar-label">${predLabel} · ${predDays}d</span>
+            </div>
+          </div>
+        </div>
+      </div>`;
+    });
+  });
+
+  html += `</div>`; // gantt-body
+  section.innerHTML = html;
+
+  section.querySelectorAll('.machine-cap-input').forEach(input => {
+    input.addEventListener('change', () => {
+      onMachineCapChange(input.dataset.machine, input.value);
+    });
+  });
+}
+
+// ── Tooltip ───────────────────────────────────────────────────────────────
+function showTT(event, idx, type) {
+  const job  = jobs[idx];
+  const cap  = capFor(job.cell);
+  const { predictedStart, predictedEnd } = calcAllPredictions().get(job.id);
+  const diffDays = Math.round((job.scheduledEnd - predictedEnd) / 86400000);
+
+  document.getElementById('ttTitle').textContent    = type === 'pred' ? 'Predicted Completion' : 'Scheduled';
+  document.getElementById('ttJob').textContent      = job.jobNum;
+  document.getElementById('ttPart').textContent     = job.partNum;
+  document.getElementById('ttOp').textContent       = job.opNum;
+  document.getElementById('ttCell').textContent     = job.cell;
+  document.getElementById('ttStart').textContent    = fmtDate(job.scheduledStart);
+  document.getElementById('ttSchedEnd').textContent = fmtDate(job.scheduledEnd);
+  document.getElementById('ttJobCpt').textContent   = job.jobCptDate ? fmtDate(job.jobCptDate) : '—';
+  document.getElementById('ttHours').textContent    = `${job.runHours} / ${job.setupHours} / ${job.totalHours}`;
+  document.getElementById('ttHrsLeft').textContent  = `${job.hoursLeft} hrs`;
+  document.getElementById('ttCap').textContent      = `${cap} hrs/day`;
+  document.getElementById('ttPredEnd').textContent  = `${fmtDate(predictedStart)} → ${fmtDate(predictedEnd)}`;
+
+  const varEl = document.getElementById('ttVariance');
+  if (diffDays === 0) { varEl.textContent = 'On time'; varEl.style.color = '#8b949e'; }
+  else if (diffDays > 0) { varEl.textContent = `+${diffDays} days early`; varEl.style.color = '#3fb950'; }
+  else { varEl.textContent = `${Math.abs(diffDays)} days late`; varEl.style.color = '#f85149'; }
+
+  const tt = document.getElementById('tooltip');
+  tt.style.display = 'block';
+  moveTT(event);
+}
+
+document.addEventListener('mousemove', e => {
+  if (document.getElementById('tooltip').style.display === 'block') moveTT(e);
+});
+
+function moveTT(e) {
+  const tt = document.getElementById('tooltip');
+  let x = e.clientX + 14, y = e.clientY + 14;
+  if (x + 240 > window.innerWidth)  x = e.clientX - 250;
+  if (y + 200 > window.innerHeight) y = e.clientY - 210;
+  tt.style.left = x + 'px';
+  tt.style.top  = y + 'px';
+}
+
+function hideTT() { document.getElementById('tooltip').style.display = 'none'; }
+
+// ── Working-day arithmetic ────────────────────────────────────────────────
+function isWeekend(date) {
+  const d = date.getDay();
+  return d === 0 || d === 6;
+}
+
+// Advance date forward until it lands on a weekday (Mon–Fri).
+function snapToWeekday(date) {
+  const d = new Date(date);
+  while (isWeekend(d)) d.setDate(d.getDate() + 1);
+  return d;
+}
+
+// Add workingHours of machine time to startDate, skipping Sat/Sun.
+// hoursPerDay = machine capacity (hrs/working day).
+function addWorkingHours(startDate, workingHours, hoursPerDay) {
+  if (workingHours <= 0) return new Date(startDate);
+
+  let current = snapToWeekday(new Date(startDate));
+  let remaining = workingHours;
+
+  // Consume full working days
+  while (remaining > hoursPerDay) {
+    remaining -= hoursPerDay;
+    // Advance one calendar day, skip weekends
+    current.setDate(current.getDate() + 1);
+    while (isWeekend(current)) current.setDate(current.getDate() + 1);
+  }
+
+  // Add the fractional day as clock hours
+  current = new Date(current.getTime() + remaining * 3600000);
+
+  // If the clock hours crossed into a weekend, snap forward to Monday
+  if (isWeekend(current)) {
+    current = snapToWeekday(current);
+  }
+
+  return current;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+function pad2(n) { return String(n).padStart(2, '0'); }
+function toInputDate(d) { return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`; }
+function fmtTime12(h, m) {
+  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+  return `${h12}:${pad2(m)} ${h < 12 ? 'AM' : 'PM'}`;
+}
+
+function fmtDate(d) {
+  return d.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
+}
+function fmtDateShort(d) {
+  return d.toLocaleDateString('en-US', { month:'short', day:'numeric' });
+}
+function fmtDateMD(d) {
+  return d.toLocaleDateString('en-US', { month:'numeric', day:'numeric' });
+}
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+</script>
+</body>
+</html>
