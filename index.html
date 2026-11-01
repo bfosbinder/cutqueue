@@ -183,7 +183,37 @@ body.gantt-only #tableSection { display: none !important; }
 .btn:hover { opacity: 0.8; }
 .btn-primary { background: #238636; color: #fff; }
 .btn-danger  { background: var(--bg-elevated); color: #f85149; border: 1px solid var(--border); }
+.btn-secondary { background: var(--bg-elevated); color: var(--text-body); border: 1px solid var(--border); }
 .btn-sm { padding: 4px 12px; font-size: 12px; height: 26px; }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.paste-box.drag-over textarea { border-color: #388bfd; box-shadow: 0 0 0 3px rgba(56,139,253,0.25); }
+
+/* skipped rows + workbook import preview */
+.skip-note {
+  margin-top: 8px; padding: 8px 12px; font-size: 12px; line-height: 1.5;
+  color: #f0a000; background: rgba(240,160,0,0.08);
+  border: 1px solid rgba(240,160,0,0.25); border-radius: 6px;
+}
+.skip-note strong { display: block; }
+.import-panel {
+  margin-top: 10px; padding: 12px 14px; font-size: 12px;
+  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px;
+}
+.import-panel.hidden { display: none; }
+.imp-title { font-weight: 700; color: var(--text-primary); margin-bottom: 8px; font-size: 13px; }
+.paste-box .imp-opt {
+  display: flex; align-items: flex-start; gap: 8px; padding: 3px 0; margin: 0; cursor: pointer;
+  font-size: 12px; font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--text-body);
+}
+.imp-opt input { margin-top: 2px; }
+.imp-detail { color: var(--text-muted); }
+.imp-preview { border-collapse: collapse; margin: 8px 0 4px; width: 100%; }
+.imp-preview th, .imp-preview td { padding: 3px 8px; text-align: left; white-space: nowrap; border-bottom: 1px solid var(--border); }
+.imp-preview th { color: var(--text-muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+.imp-skips, .imp-notes { margin-top: 8px; color: var(--text-muted); line-height: 1.5; }
+.imp-skips { color: #f0a000; }
+.imp-skips strong { display: block; }
+.imp-actions { display: flex; gap: 8px; margin-top: 10px; }
 
 .parse-status { font-size: 12px; color: var(--text-muted); }
 .parse-status.ok  { color: #3fb950; }
@@ -700,15 +730,19 @@ body.hide-sched .sched-track { display: none; }
 <!-- Paste + Settings -->
 <div class="top-panel">
   <div class="paste-box">
-    <label>Paste Schedule Data from Excel</label>
+    <label>Paste Schedule Data from Excel, or open the workbook</label>
     <textarea id="pasteArea" placeholder="Copy rows from Excel (including the header row) and paste here.
 
 Expected columns: ORDER TO RUN  Job  Part  Op #  Cell  Op Start Date  Op Cpt Date  Job Cpt Date  Run Hours  Setup  Total  Hrs Left  OTTB %  OTTP%  NOTES  Schedule Status  LOADED ON MEMEX"></textarea>
     <div class="paste-actions">
       <button class="btn btn-primary" onclick="parseAndLoad()">Load Jobs</button>
+      <button class="btn btn-secondary" onclick="document.getElementById('fileInput').click()">Open Excel file…</button>
       <button class="btn btn-danger" onclick="clearAll()">Clear All</button>
       <span class="parse-status" id="parseStatus"></span>
+      <input type="file" id="fileInput" accept=".xlsx,.xlsm,.xls,.csv" hidden onchange="handleFile(this.files[0])">
     </div>
+    <div class="skip-note" id="skipNote" style="display:none;"></div>
+    <div class="import-panel hidden" id="importPanel"></div>
   </div>
 
   <div class="settings-box">
@@ -840,6 +874,19 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('todayDisplay').textContent = fmtDate(new Date());
   populateAnchorTime();
   initAnchorDefaults();
+
+  // Drop a workbook anywhere on the paste box to open it
+  const box = document.querySelector('.paste-box');
+  const hasFile = e => e.dataTransfer && [...e.dataTransfer.types].includes('Files');
+  ['dragenter', 'dragover'].forEach(ev => box.addEventListener(ev, e => {
+    if (!hasFile(e)) return;
+    e.preventDefault(); box.classList.add('drag-over');
+  }));
+  ['dragleave', 'drop'].forEach(ev => box.addEventListener(ev, e => {
+    if (ev === 'drop' && !hasFile(e)) return;
+    e.preventDefault(); box.classList.remove('drag-over');
+  }));
+  box.addEventListener('drop', e => { if (hasFile(e)) handleFile(e.dataTransfer.files[0]); });
 });
 
 function exportPDF() {
@@ -968,45 +1015,224 @@ function initAnchorDefaults() {
   onAnchorChange();
 }
 
-// ── Parse Excel Paste ─────────────────────────────────────────────────────
-function parseAndLoad() {
-  const raw = document.getElementById('pasteArea').value.trim();
-  const statusEl = document.getElementById('parseStatus');
+// ── Import: table detection ───────────────────────────────────────────────
+// Pasted text and .xlsx sheets both become a grid (array of rows, each an
+// array of cell values) and go through the same header search, so neither
+// depends on which cell the data starts in.
+const XLSX_URL = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
 
-  if (!raw) {
-    setStatus('Paste data first.', 'err');
-    return;
-  }
+const COLUMN_ALIASES = {
+  orderToRun:  ['order to run', 'order', 'run order', 'priority'],
+  jobNum:      ['job', 'job #', 'job number', 'job no'],
+  partNum:     ['part', 'part #', 'part number', 'part no'],
+  opNum:       ['op #', 'op#', 'op', 'op number', 'operation'],
+  cell:        ['cell', 'machine', 'work center'],
+  opStart:     ['op start date', 'op start', 'operation start'],
+  opCpt:       ['op cpt date', 'op cpt', 'op complete date', 'op completion date', 'op end date'],
+  jobCpt:      ['job cpt date', 'job cpt', 'job complete date', 'job completion date'],
+  runHours:    ['run hours', 'run hrs', 'run'],
+  setup:       ['setup', 'setup hours', 'setup hrs'],
+  total:       ['total', 'total hours', 'total hrs'],
+  hrsLeft:     ['hrs left', 'hours left', 'hrs remaining', 'hours remaining'],
+  ottb:        ['ottb %', 'ottb'],
+  ottp:        ['ottp %', 'ottp%', 'ottp'],
+  notes:       ['notes'],
+  schedStatus: ['schedule status', 'sched status'],
+  memex:       ['loaded on memex', 'memex'],
+};
+const REQUIRED_COLS = ['jobNum', 'opStart', 'opCpt', 'hrsLeft'];
+const COL_LABELS    = { jobNum: 'Job', opStart: 'Op Start Date', opCpt: 'Op Cpt Date', hrsLeft: 'Hrs Left' };
+const DEFAULT_COLUMN_ORDER = ['orderToRun', 'jobNum', 'partNum', 'opNum', 'cell', 'opStart', 'opCpt', 'jobCpt',
+  'runHours', 'setup', 'total', 'hrsLeft', 'ottb', 'ottp', 'notes', 'schedStatus', 'memex'];
+const MAX_SHEET_ROWS = 20000;
+const MAX_SHEET_COLS = 60;
 
-  const lines = raw.split(/\r?\n/).filter(l => l.trim());
-  if (lines.length < 2) {
-    setStatus('Need at least a header row and one data row.', 'err');
-    return;
-  }
-
-  // Detect header row and find column indices
-  const headerLine = lines[0].split('\t').map(h => h.trim().toLowerCase());
-  const colIdx = detectColumns(headerLine);
-
-  if (colIdx === null) {
-    // Try treating first line as data (no header)
-    const parsed = parseRows(lines, null);
-    if (parsed.length === 0) {
-      setStatus('Could not parse data. Copy the header row too.', 'err');
-      return;
-    }
-    finishLoad(parsed);
-  } else {
-    const parsed = parseRows(lines.slice(1), colIdx);
-    if (parsed.length === 0) {
-      setStatus('No valid rows found.', 'err');
-      return;
-    }
-    finishLoad(parsed);
-  }
+function normHeader(v) {
+  return String(v == null ? '' : v).toLowerCase().replace(/[\s ]+/g, ' ').trim();
 }
 
-function finishLoad(parsed) {
+// Match a row of cells against the known column names. Exact names win; a
+// looser "contains" match fills in the rest. A column is only claimed once, so
+// "Job Cpt Date" can never be mistaken for "Job".
+function mapHeaderRow(cells) {
+  const hdr  = cells.map(normHeader);
+  const used = new Set();
+  const map  = {};
+  const claim = (key, test) => {
+    const i = hdr.findIndex((h, idx) => h && !used.has(idx) && test(h));
+    if (i >= 0) { map[key] = i; used.add(i); }
+  };
+  Object.entries(COLUMN_ALIASES).forEach(([key, names]) => claim(key, h => names.includes(h)));
+  Object.entries(COLUMN_ALIASES).forEach(([key, names]) => {
+    if (key in map) return;
+    const loose = names.filter(n => n.length >= 4);
+    claim(key, h => loose.some(n => h.includes(n)));
+  });
+  const missing = REQUIRED_COLS.filter(k => !(k in map));
+  return { map, missing, found: REQUIRED_COLS.length - missing.length };
+}
+
+function isBlankRow(row) {
+  return row.every(c => c == null || String(c).trim() === '');
+}
+
+// ── Cell value helpers ────────────────────────────────────────────────────
+function cellText(v) {
+  if (v == null) return '';
+  if (typeof v === 'number') return Number.isInteger(v) ? String(v) : String(+v.toFixed(4));
+  return String(v).trim();
+}
+
+function cellNum(v) {
+  if (typeof v === 'number') return v;
+  const n = parseFloat(String(v == null ? '' : v).replace(/,/g, ''));
+  return isNaN(n) ? 0 : n;
+}
+
+function validDate(y, mo, d) {
+  const dt = new Date(y, mo, d);
+  return (dt.getFullYear() === y && dt.getMonth() === mo && dt.getDate() === d) ? dt : null;
+}
+
+// Accepts Excel serial numbers (what a real .xlsx date cell holds) as well as
+// M/D/YYYY, M/D/YY, YYYY-MM-DD (any of them with a trailing time) and "Nov 2, 2026".
+function parseExcelDate(v) {
+  if (v == null || v === '') return null;
+  if (v instanceof Date) return isNaN(v) ? null : new Date(v.getFullYear(), v.getMonth(), v.getDate());
+  if (typeof v === 'number') {
+    if (v < 20000 || v > 80000) return null;
+    const d = new Date(Date.UTC(1899, 11, 30) + Math.floor(v) * 86400000);
+    return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  }
+  const str = String(v).trim();
+  let m = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})(?:\s+\d{1,2}:\d{2}.*)?$/);
+  if (m) return validDate(m[3].length === 2 ? 2000 + +m[3] : +m[3], +m[1] - 1, +m[2]);
+  m = str.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s].*)?$/);
+  if (m) return validDate(+m[1], +m[2] - 1, +m[3]);
+  if (/[a-z]{3}/i.test(str)) {
+    const t = new Date(str);
+    if (!isNaN(t)) return new Date(t.getFullYear(), t.getMonth(), t.getDate());
+  }
+  return null;
+}
+
+// ── Table extraction ──────────────────────────────────────────────────────
+// Read job rows below a header row. Stops after three blank rows in a row, or
+// at the next header row. Rows it can't use are returned in `skipped` with a
+// reason instead of being dropped silently.
+function extractTable(grid, headerRow, map) {
+  const out = [], skipped = [];
+  const get = (row, key) => (key in map) ? row[map[key]] : '';
+  let blanks = 0, lastRow = headerRow, r = headerRow + 1;
+
+  for (; r < grid.length; r++) {
+    const row = grid[r] || [];
+    if (isBlankRow(row)) { if (++blanks >= 3) break; continue; }
+    blanks = 0;
+    if (mapHeaderRow(row).missing.length === 0) break;
+    lastRow = r;
+
+    const jobNum = cellText(get(row, 'jobNum'));
+    if (!jobNum) { skipped.push({ row: r, why: 'no job number' }); continue; }
+    if (isNaN(parseInt(jobNum)) && /job/i.test(jobNum)) continue;   // repeated header text
+
+    const rawStart = get(row, 'opStart'), rawCpt = get(row, 'opCpt');
+    const opStart  = parseExcelDate(rawStart), opCpt = parseExcelDate(rawCpt);
+    if (!opStart || !opCpt) {
+      const [label, raw] = !opStart ? ['Op Start Date', rawStart] : ['Op Cpt Date', rawCpt];
+      const text = cellText(raw);
+      skipped.push({ row: r, job: jobNum,
+        why: text ? `${label} "${text}" isn't a date I recognise` : `${label} is blank` });
+      continue;
+    }
+
+    out.push({
+      id:             Date.now() + Math.random(),
+      priority:       parseInt(cellText(get(row, 'orderToRun'))) || (r - headerRow),
+      jobNum,
+      partNum:        cellText(get(row, 'partNum')),
+      opNum:          cellText(get(row, 'opNum')),
+      cell:           cellText(get(row, 'cell')),
+      scheduledStart: opStart,
+      scheduledEnd:   opCpt,
+      jobCptDate:     parseExcelDate(get(row, 'jobCpt')),
+      runHours:       cellNum(get(row, 'runHours')),
+      setupHours:     cellNum(get(row, 'setup')),
+      totalHours:     cellNum(get(row, 'total')),
+      hoursLeft:      cellNum(get(row, 'hrsLeft')),
+      ottb:           cellText(get(row, 'ottb')),
+      ottp:           cellText(get(row, 'ottp')),
+      notes:          cellText(get(row, 'notes')),
+      schedStatus:    cellText(get(row, 'schedStatus')),
+      memex:          cellText(get(row, 'memex')),
+      color:          '#388bfd',
+    });
+  }
+  return { jobs: out, skipped, lastRow, next: r };
+}
+
+// Find every header row in the grid and read the table under each one. `best`
+// is the closest near-miss, used to explain a failure.
+function findTables(grid) {
+  const tables = [];
+  let best = null, i = 0;
+  while (i < grid.length) {
+    const h = mapHeaderRow(grid[i] || []);
+    if (!best || h.found > best.found) best = { ...h, row: i };
+    if (h.missing.length === 0) {
+      const t = extractTable(grid, i, h.map);
+      tables.push({ headerRow: i, map: h.map, ...t });
+      i = Math.max(t.next, i + 1);
+    } else {
+      i++;
+    }
+  }
+  return { tables, best };
+}
+
+function describeMiss(best, originRow = 0) {
+  if (!best || best.found < 2) {
+    return 'no header row found (it needs Job, Op Start Date, Op Cpt Date and Hrs Left)';
+  }
+  const missing = best.missing.map(k => COL_LABELS[k]).join(', ');
+  return `the closest header, on row ${originRow + best.row + 1}, is missing ${missing}`;
+}
+
+// ── Paste ─────────────────────────────────────────────────────────────────
+function parseAndLoad() {
+  const raw = document.getElementById('pasteArea').value.replace(/\s+$/, '');
+  if (!raw.trim()) { setStatus('Paste data first.', 'err'); return; }
+
+  // Only trailing whitespace is trimmed: leading tabs are empty cells and
+  // trimming them would shift every column.
+  const grid = raw.split(/\r?\n/).map(line => line.split('\t'));
+  const { tables, best } = findTables(grid);
+
+  if (tables.length) {
+    const parsed  = tables.flatMap(t => t.jobs);
+    const skipped = tables.flatMap(t => t.skipped.map(s => ({ ...s, row: s.row + 1 })));
+    if (!parsed.length) {
+      renderSkipNote(skipped);
+      setStatus('Found the header row but no usable job rows.', 'err');
+      return;
+    }
+    finishLoad(parsed, skipped);
+    return;
+  }
+
+  // No header row: assume the standard column order.
+  const map = {};
+  DEFAULT_COLUMN_ORDER.forEach((key, i) => { map[key] = i; });
+  const t = extractTable(grid, -1, map);
+  if (!t.jobs.length) {
+    renderSkipNote(t.skipped.map(s => ({ ...s, row: s.row + 1 })));
+    setStatus(`Couldn't find the schedule: ${describeMiss(best)}.`, 'err');
+    return;
+  }
+  finishLoad(t.jobs, t.skipped.map(s => ({ ...s, row: s.row + 1 })));
+}
+
+function finishLoad(parsed, skipped = []) {
   jobs = parsed;
   selectedMachine = null; // reset to All on fresh load
   jobs.sort((a, b) => a.priority - b.priority);
@@ -1015,7 +1241,9 @@ function finishLoad(parsed) {
   groupByMachine(jobs).forEach((_, name) => {
     if (!machineCapacities.has(name)) machineCapacities.set(name, DEFAULT_CAP);
   });
-  setStatus(`${jobs.length} job${jobs.length !== 1 ? 's' : ''} loaded`, 'ok');
+  const skipText = skipped.length ? `, ${skipped.length} row${skipped.length !== 1 ? 's' : ''} skipped` : '';
+  setStatus(`${jobs.length} job${jobs.length !== 1 ? 's' : ''} loaded${skipText}`, 'ok');
+  renderSkipNote(skipped);
   renderMachineCapacityInputs();
   renderMachineTabs();
   renderSummary();
@@ -1023,93 +1251,165 @@ function finishLoad(parsed) {
   renderGantt();
 }
 
-function detectColumns(header) {
-  const find = (...terms) => header.findIndex(h => terms.some(t => h.includes(t)));
-
-  const orderToRun  = find('order to run', 'order');
-  const jobNum      = find('job');
-  const partNum     = find('part');
-  const opNum       = find('op #', 'op#');
-  const cell        = find('cell');
-  const opStart     = find('op start');
-  const opCpt       = find('op cpt');
-  const jobCpt      = find('job cpt');
-  const runHours    = find('run hours', 'run hrs');
-  const setup       = find('setup');
-  const total       = find('total');
-  const hrsLeft     = find('hrs left', 'hours left');
-  const ottb        = find('ottb');
-  const ottp        = find('ottp');
-  const notes       = find('notes');
-  const schedStatus = find('schedule status');
-  const memex       = find('memex');
-
-  if (jobNum < 0 || opStart < 0 || opCpt < 0 || hrsLeft < 0) return null;
-
-  return { orderToRun, jobNum, partNum, opNum, cell, opStart, opCpt, jobCpt,
-           runHours, setup, total, hrsLeft, ottb, ottp, notes, schedStatus, memex };
+function renderSkipNote(skipped) {
+  const el = document.getElementById('skipNote');
+  if (!skipped.length) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  const shown = skipped.slice(0, 8).map(s =>
+    `<div>${s.sheet ? esc(s.sheet) + ' · ' : ''}row ${s.row}${s.job ? ' (job ' + esc(s.job) + ')' : ''}: ${esc(s.why)}</div>`);
+  if (skipped.length > shown.length) shown.push(`<div>…and ${skipped.length - shown.length} more</div>`);
+  el.style.display = 'block';
+  el.innerHTML = `<strong>${skipped.length} row${skipped.length !== 1 ? 's' : ''} not loaded</strong>${shown.join('')}`;
 }
 
-function parseRows(lines, colIdx) {
-  const C = colIdx || {
-    orderToRun: 0, jobNum: 1, partNum: 2, opNum: 3, cell: 4,
-    opStart: 5, opCpt: 6, jobCpt: 7, runHours: 8, setup: 9,
-    total: 10, hrsLeft: 11, ottb: 12, ottp: 13, notes: 14,
-    schedStatus: 15, memex: 16
-  };
+// ── Excel workbook import ─────────────────────────────────────────────────
+let pendingImport = null;   // { fileName, candidates, notes, choice }
 
-  const result = [];
-  lines.forEach((line, idx) => {
-    if (!line.trim()) return;
-    const cols = line.split('\t');
-    if (cols.length < 8) return;
+// SheetJS is only fetched the first time a workbook is opened, so pasting
+// keeps working offline and the page stays small.
+function ensureXLSX() {
+  return new Promise((resolve, reject) => {
+    if (window.XLSX) { resolve(window.XLSX); return; }
+    const s = document.createElement('script');
+    s.src = XLSX_URL;
+    s.onload  = () => { s.remove(); window.XLSX ? resolve(window.XLSX) : reject(new Error('The Excel reader did not start.')); };
+    s.onerror = () => { s.remove(); reject(new Error("Couldn't download the Excel reader. It needs an internet connection the first time; pasting still works offline.")); };
+    document.head.appendChild(s);
+  });
+}
 
-    const g = (i) => (i >= 0 && i < cols.length) ? cols[i].trim() : '';
+async function handleFile(file) {
+  if (!file) return;
+  setStatus(`Reading ${file.name}…`, '');
+  try {
+    const X   = await ensureXLSX();
+    const buf = await file.arrayBuffer();
+    analyseWorkbook(X, buf, file.name);
+  } catch (e) {
+    setStatus(e.message || String(e), 'err');
+  }
+  document.getElementById('fileInput').value = '';
+}
 
-    const opStart = parseExcelDate(g(C.opStart));
-    const opCpt   = parseExcelDate(g(C.opCpt));
-    if (!opStart || !opCpt) return;
+function analyseWorkbook(X, buf, fileName) {
+  const wb      = X.read(buf, { type: 'array' });
+  const sheetMeta = (wb.Workbook && wb.Workbook.Sheets) || [];
+  const candidates = [], notes = [];
 
-    const jobNum  = g(C.jobNum)  || `Job ${idx + 1}`;
-    // Skip rows where job looks like a header word
-    if (isNaN(parseInt(jobNum)) && jobNum.toLowerCase().includes('job')) return;
+  wb.SheetNames.forEach((name, si) => {
+    const ws = wb.Sheets[name];
+    if (!ws || !ws['!ref']) { notes.push({ sheet: name, text: 'empty tab' }); return; }
+    const full   = X.utils.decode_range(ws['!ref']);
+    const limit  = { s: full.s, e: { r: Math.min(full.e.r, full.s.r + MAX_SHEET_ROWS), c: Math.min(full.e.c, full.s.c + MAX_SHEET_COLS) } };
+    const grid   = X.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '', blankrows: true, range: limit });
+    const { tables, best } = findTables(grid);
+    const hidden = !!(sheetMeta[si] && sheetMeta[si].Hidden);
 
-    result.push({
-      id:            Date.now() + Math.random(),
-      priority:      parseInt(g(C.orderToRun)) || (idx + 1),
-      jobNum,
-      partNum:       g(C.partNum),
-      opNum:         g(C.opNum),
-      cell:          g(C.cell),
-      scheduledStart: opStart,
-      scheduledEnd:   opCpt,
-      jobCptDate:    parseExcelDate(g(C.jobCpt)),
-      runHours:      parseFloat(g(C.runHours)) || 0,
-      setupHours:    parseFloat(g(C.setup))    || 0,
-      totalHours:    parseFloat(g(C.total))    || 0,
-      hoursLeft:     parseFloat(g(C.hrsLeft))  || 0,
-      ottb:          g(C.ottb),
-      ottp:          g(C.ottp),
-      notes:         g(C.notes),
-      schedStatus:   g(C.schedStatus),
-      memex:         g(C.memex),
-      color:         '#388bfd',
+    if (!tables.length) { notes.push({ sheet: name, text: describeMiss(best, full.s.r) }); return; }
+    tables.forEach(t => {
+      const cols  = Object.values(t.map);
+      const range = X.utils.encode_range({
+        s: { r: full.s.r + t.headerRow, c: full.s.c + Math.min(...cols) },
+        e: { r: full.s.r + t.lastRow,   c: full.s.c + Math.max(...cols) },
+      });
+      candidates.push({
+        sheet: name, hidden, range, jobs: t.jobs,
+        skipped: t.skipped.map(s => ({ ...s, row: full.s.r + s.row + 1, sheet: name })),
+      });
     });
   });
-  return result;
+
+  showImportPanel(fileName, candidates, notes);
 }
 
-// ── Date parsing ──────────────────────────────────────────────────────────
-function parseExcelDate(str) {
-  if (!str) return null;
-  str = str.trim();
-  // M/D/YYYY or MM/DD/YYYY
-  const m1 = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (m1) return new Date(+m1[3], +m1[1]-1, +m1[2]);
-  // YYYY-MM-DD
-  const m2 = str.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (m2) return new Date(+m2[1], +m2[2]-1, +m2[3]);
-  return null;
+function showImportPanel(fileName, candidates, notes) {
+  const panel = document.getElementById('importPanel');
+  panel.classList.remove('hidden');
+  if (!candidates.length) {
+    pendingImport = null;
+    panel.innerHTML = `
+      <div class="imp-title">No schedule table found in ${esc(fileName)}</div>
+      ${importNotesHtml(notes)}
+      <div class="imp-actions"><button class="btn btn-danger btn-sm" onclick="closeImport()">Close</button></div>`;
+    setStatus('No schedule table found in that workbook.', 'err');
+    return;
+  }
+  let best = 0;
+  candidates.forEach((c, i) => { if (c.jobs.length > candidates[best].jobs.length) best = i; });
+  pendingImport = { fileName, candidates, notes, choice: String(best) };
+  setStatus('Check what was found, then load it.', '');
+  renderImportPanel();
+}
+
+function importNotesHtml(notes) {
+  if (!notes.length) return '';
+  return `<div class="imp-notes">${notes.map(n => `<div>${esc(n.sheet)}: ${esc(n.text)}</div>`).join('')}</div>`;
+}
+
+function renderImportPanel() {
+  const { fileName, candidates, notes, choice } = pendingImport;
+  const panel = document.getElementById('importPanel');
+  const many  = candidates.filter(c => c.jobs.length).length > 1;
+
+  const radio = (value, label, detail) => `
+    <label class="imp-opt">
+      <input type="radio" name="impChoice" value="${value}" ${choice === value ? 'checked' : ''}
+             onchange="pendingImport.choice=this.value; renderImportPanel()">
+      <span><strong>${label}</strong> <span class="imp-detail">${detail}</span></span>
+    </label>`;
+
+  let opts = candidates.map((c, i) => radio(String(i),
+    `Tab “${esc(c.sheet)}”${c.hidden ? ' (hidden)' : ''}`,
+    `${esc(c.range)} · ${c.jobs.length} job${c.jobs.length !== 1 ? 's' : ''}` +
+    (c.skipped.length ? ` · ${c.skipped.length} skipped` : ''))).join('');
+  if (many) {
+    const total = candidates.reduce((s, c) => s + c.jobs.length, 0);
+    opts += radio('all', 'All of the above together', `${total} jobs`);
+  }
+
+  const picked  = choice === 'all' ? candidates : [candidates[+choice]];
+  const pJobs   = picked.flatMap(c => c.jobs);
+  const pSkip   = picked.flatMap(c => c.skipped);
+  const preview = pJobs.slice(0, 6).map(j => `<tr>
+      <td>${esc(j.jobNum)}</td><td>${esc(j.partNum)}</td><td>${esc(j.opNum)}</td><td>${esc(j.cell)}</td>
+      <td>${fmtDate(j.scheduledStart)}</td><td>${fmtDate(j.scheduledEnd)}</td><td>${j.hoursLeft}</td></tr>`).join('');
+  const skipLines = pSkip.slice(0, 6).map(s =>
+    `<div>${esc(s.sheet)} · row ${s.row}${s.job ? ' (job ' + esc(s.job) + ')' : ''}: ${esc(s.why)}</div>`).join('') +
+    (pSkip.length > 6 ? `<div>…and ${pSkip.length - 6} more</div>` : '');
+
+  panel.innerHTML = `
+    <div class="imp-title">Found in ${esc(fileName)}</div>
+    <div class="imp-opts">${opts}</div>
+    ${pJobs.length ? `
+      <table class="imp-preview">
+        <thead><tr><th>Job</th><th>Part</th><th>Op</th><th>Cell</th><th>Op Start</th><th>Op Cpt</th><th>Hrs Left</th></tr></thead>
+        <tbody>${preview}</tbody>
+      </table>
+      ${pJobs.length > 6 ? `<div class="imp-detail">…and ${pJobs.length - 6} more rows</div>` : ''}`
+      : `<div class="imp-detail">No usable job rows in this selection.</div>`}
+    ${skipLines ? `<div class="imp-skips"><strong>Not loaded</strong>${skipLines}</div>` : ''}
+    ${importNotesHtml(notes)}
+    <div class="imp-actions">
+      <button class="btn btn-primary btn-sm" onclick="confirmImport()" ${pJobs.length ? '' : 'disabled'}>Load these jobs</button>
+      <button class="btn btn-danger btn-sm" onclick="closeImport()">Cancel</button>
+    </div>`;
+}
+
+function confirmImport() {
+  if (!pendingImport) return;
+  const { candidates, choice } = pendingImport;
+  const picked  = choice === 'all' ? candidates : [candidates[+choice]];
+  const parsed  = picked.flatMap(c => c.jobs);
+  const skipped = picked.flatMap(c => c.skipped);
+  if (!parsed.length) return;
+  closeImport();
+  finishLoad(parsed, skipped);
+}
+
+function closeImport() {
+  pendingImport = null;
+  const panel = document.getElementById('importPanel');
+  panel.classList.add('hidden');
+  panel.innerHTML = '';
 }
 
 // ── Capacity ──────────────────────────────────────────────────────────────
@@ -1207,6 +1507,8 @@ function clearAll() {
   document.getElementById('pasteArea').value = '';
   document.getElementById('parseStatus').textContent = '';
   document.getElementById('parseStatus').className = 'parse-status';
+  renderSkipNote([]);
+  closeImport();
   document.getElementById('tableSection').classList.add('hidden');
   document.getElementById('summarySection').classList.add('hidden');
   document.getElementById('machineTabBar').style.display = 'none';
